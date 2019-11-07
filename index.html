@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Image Capture Demo</title>
+
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"
+          integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+    <style>
+        div#capturedImageContainer img{
+            margin-bottom: 20px;
+            max-width: 330px;
+        }
+
+        .results-label {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Image Capture Demo</h1>
+    <p>
+        Notice that this demo needs to be ran from inside Upland Mobile shell application.
+    </p>
+    <div id="no-um-error" class="alert alert-danger" role="alert" style="display: none">
+        Upland Mobile shell not found!
+    </div>
+    <div>
+        <button type="button" onclick="callImageCapturePlugin()" class="btn btn-large btn-primary">Call Image Capture
+            plugin
+        </button>
+        <button type="button" onclick="location.reload()" class="btn btn-large btn-secondary">Reload page</button>
+    </div>
+    <div id="capturedImageContainer" style="display: none">
+        <p class="results-label">
+            Resulting image(s):
+        </p>
+    </div>
+</div>
+</body>
+<script>
+var XamarinService = {};
+
+var __delegateHolderRA = {};
+var __iDelegateHolderRACounter = 0;
+
+var existingImages = [];
+
+// Responsible for preparing the callbacks and putting them
+function __CSharpInvoker(Feature, Argument, successCallback, failureCallback, actionType) {
+    __delegateHolderRA[__iDelegateHolderRACounter] = {
+        success: function (data) {
+            if (successCallback) {
+                successCallback(data);
+            }
+            __cleanDelegateHolderRA(__iDelegateHolderRACounter);
+        },
+        error: function (data) {
+            if (failureCallback) {
+                failureCallback(data);
+            }
+            __cleanDelegateHolderRA(__iDelegateHolderRACounter);
+        }
+    };
+    __invokeCSharpAction(Feature, __iDelegateHolderRACounter, Argument, actionType);
+    __iDelegateHolderRACounter++;
+}
+
+// Removes the delegate from the array
+function __cleanDelegateHolderRA(counter) {
+    __delegateHolderRA[counter] = null;
+    delete __delegateHolderRA[counter];
+}
+
+// Responsible for actually triggering the Invoke event on C# code, per platform
+// the XAM_OS & XAM_WEBVIEWIMPLEMENTATION variables to decide what platform we are in to call the proper trigger.
+// Avoid calling this directly, use __CSharpInvoker instead to guarantee proper placement and call of delegates.
+function __invokeCSharpAction(feature, actionId, argument, actionType) {
+    var payload = {
+        Feature: feature,
+        ActionId: actionId,
+        Argument: argument,
+        ActionType: actionType
+    };
+    if (typeof (callPlugin) !== "undefined") {
+        callPlugin(JSON.stringify(payload));
+    } else {
+        console.warn('Tried to invoke feature {0} but callPlugin is undefined'.format(feature), payload);
+    }
+}
+
+// Responsible for calling back the delegateHolder array on specific index and payload based on action result
+function __callbackDelegate(event, args) {
+    if (args.Status === 'Ok') {
+        __delegateHolderRA[args.ActionId].success(args)
+    } else {
+        __delegateHolderRA[args.ActionId].error(args)
+    }
+}
+
+// Called by Upland Mobile. Usually broadcasts an angular event. Here we can simply take the payload and call the callback
+window.UplandMobileBroadcaster = function (payload) {
+    __callbackDelegate('XamCBListener', payload);
+};
+
+
+XamarinService.captureImage = function (imageCaptureOptions, callbackSuccess, callbackFailed) {
+    __CSharpInvoker('upland.feature.IMAGE.CAPTURE',
+        JSON.stringify(imageCaptureOptions),
+        function (args) {
+            callbackSuccess(args.Data);
+        },
+        function (args) {
+            callbackFailed(args);
+        });
+};
+
+function onCaptureSucceeded(result) {
+    // result is an array of strings containing images encoded as base64
+    if(!result || result.length === 0){
+        console.log('No capture!');
+        return;
+    }        
+    
+    const capturedImageContainer = document.getElementById('capturedImageContainer');
+    const containerChildren = capturedImageContainer.childNodes;
+    existingImages = [];
+
+    // First clear the existing images because we are using session capture continuation feature
+    for (let i = containerChildren.length; i > 0; i--) {
+        const index = i-1;
+        if (containerChildren[index].tagName && containerChildren[index].tagName.toUpperCase() === "IMG"){
+            capturedImageContainer.removeChild(containerChildren[index]);
+        }
+    }
+
+    // Then add the resulting images which includes images from the previous session
+    for (let index = 0; index < result.length; index++) {
+        const imageBase64 = result[index];
+        const imgElement = document.createElement('img');
+        imgElement.setAttribute('src', 'data:image/png;base64,' + imageBase64);
+        capturedImageContainer.appendChild(imgElement);
+        existingImages.push(imageBase64);
+    }
+
+    capturedImageContainer.style.display = 'block'
+}
+
+function onCaptureFailed(result) {
+    alert('imageCapture call failed: ' + JSON.stringify(result));
+}
+
+function callImageCapturePlugin() {
+    if (typeof callPlugin === "undefined") {
+        alert('Upland Mobile Xamarin bridge is not available. Are you running this app from within Upland Mobile?');
+        return;
+    }
+
+    // Default values will be used in case any option is omitted.
+    var imageCaptureOptions = {
+        shouldCropCapturedImage: true,
+        emptyListViewMessage: 'Fit document inside the camera area.\n' +
+            'Place on contrasting background.',
+        cameraLoadingMessage: 'Camera is loading...',
+        minimumDelayBetweenCaptureInMilliseconds: 3000,
+        existingImages: existingImages, // Used for passing images to the capture session. Leave empty or null to always start a clean capture session
+    };
+
+    XamarinService.captureImage(imageCaptureOptions, onCaptureSucceeded, onCaptureFailed);
+}
+
+setTimeout(function () {
+    if (typeof callPlugin === "undefined") {
+        document.getElementById('no-um-error').style.display = 'block';
+    }
+}, 1000)
+
+
+</script>
+</html>
